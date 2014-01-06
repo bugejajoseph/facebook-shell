@@ -245,8 +245,7 @@ quick start:
 
   >>> AUTH_SCOPE = ['publish_stream']
   >>> authenticate()
-  >>> print "Hello", graph('/me')['name']
- 
+  >>> print "Hello", graph('/me')['name'] 
   >>> status = 'This is my updated fb status!'
   >>> graph_post('/me/feed', {'message': status})
 
