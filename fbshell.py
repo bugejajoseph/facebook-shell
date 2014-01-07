@@ -11,6 +11,7 @@ import mimetools
 import mimetypes
 import cookielib
 import types
+import thread
 
 from urlparse import urlparse, parse_qs
 from urllib import urlencode
@@ -40,6 +41,11 @@ __all__ = [
     'AUTH_SCOPE',
     'LOCAL_FILE']
 
+def _random_with_n_digits(n):
+    range_start = 10**(n-1)
+    range_end = (10**n)-1
+    return randint(range_start, range_end)
+
 def _get_url(path, args=None, graph=True):
     args = args or {}
     if ACCESS_TOKEN:
@@ -50,11 +56,6 @@ def _get_url(path, args=None, graph=True):
     else:
         endpoint = "http://%s.facebook.com" % subdomain
     return endpoint+str(path)+'?'+urlencode(args)
-
-def _random_with_n_digits(n):
-    range_start = 10**(n-1)
-    range_end = (10**n)-1
-    return randint(range_start, range_end)
 
 class _MultipartPostHandler(urllib2.BaseHandler):
     handler_order = urllib2.HTTPHandler.handler_order - 10
@@ -105,6 +106,28 @@ class _MultipartPostHandler(urllib2.BaseHandler):
         buffer += '--%s--\r\n\r\n' % boundary
         return boundary, buffer
 
+class StoppableHTTPServer(BaseHTTPServer.HTTPServer):
+
+    def server_bind(self):
+        BaseHTTPServer.HTTPServer.server_bind(self)
+        self.socket.settimeout(1)
+        self.run = True
+
+    def get_request(self):
+        while self.run:
+            try:
+                sock, addr = self.socket.accept()
+                sock.settimeout(None)
+                return (sock, addr)
+            except socket.timeout:
+                pass
+
+    def stop(self):
+        self.run = False
+
+    def serve(self):
+         while ACCESS_TOKEN is None and self.run:
+            self.handle_request()
 
 class _RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
@@ -125,7 +148,8 @@ class _RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 open(LOCAL_FILE,'w').write(json.dumps(data))
                 self.wfile.write("You have successfully logged in to facebook with fbshell. ")
             else:
-                self.wfile.write("Cross-Site Request Forgery Attempt was detected!") 
+                ACCESS_TOKEN = None
+                self.send_error(404, 'Cross-Site Request Forgery Attempt was detected!')
         else:
             self.wfile.write('<html><head>'
                             '<script>location = "?"+location.hash.slice(1);</script>'
@@ -174,10 +198,8 @@ def authenticate():
                                    'state':STATE,
                                    'scope':','.join(AUTH_SCOPE)}))
 
-        httpd = BaseHTTPServer.HTTPServer((HOST_NAME, SERVER_PORT), _RequestHandler)
-
-        while ACCESS_TOKEN is None:
-            httpd.handle_request()
+        httpd = StoppableHTTPServer((HOST_NAME, SERVER_PORT), _RequestHandler)           
+        thread.start_new_thread(httpd.serve, ())
 
 def graph(path, params=None):
     """Send a GET request to the graph api.
@@ -241,14 +263,17 @@ INTRO_MESSAGE = '''\
   \/_/     \/_____/   \/_____/   \/_/\/_/   \/_____/   \/_____/   \/_____/ 
 
 Type help() for a list of commands.
-quick start:
+
+Quick start:
 
   >>> AUTH_SCOPE = ['publish_stream']
   >>> authenticate()
+
   >>> print "Hello", graph('/me')['name'] 
   >>> status = 'This is my updated fb status!'
   >>> graph_post('/me/feed', {'message': status})
 
+  >>> print fql('SELECT uid, name, email from user where uid=me()')
 '''
 
 def shell():
