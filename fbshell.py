@@ -146,10 +146,12 @@ class _RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 data = {'scope': AUTH_SCOPE,
                         'access_token': ACCESS_TOKEN}
                 open(LOCAL_FILE,'w').write(json.dumps(data))
-                self.wfile.write("You have successfully logged in to facebook with fbshell. ")
+                self.wfile.write("You have successfully logged in to facebook with fbshell. "
+                                 "You can close this window now.")
             else:
                 ACCESS_TOKEN = None
                 self.send_error(404, 'Cross-Site Request Forgery Attempt was detected!')
+
         else:
             self.wfile.write('<html><head>'
                             '<script>location = "?"+location.hash.slice(1);</script>'
@@ -187,6 +189,10 @@ def authenticate():
             needs_auth = False
 
     if needs_auth:
+        # Instantiate a server to handle the client redirection for authentication
+        httpd = StoppableHTTPServer((HOST_NAME, SERVER_PORT), _RequestHandler)           
+        thread.start_new_thread(httpd.serve, ())
+
         global STATE
         STATE = str(_random_with_n_digits(12))
 
@@ -197,9 +203,6 @@ def authenticate():
                                    'response_type':'token',
                                    'state':STATE,
                                    'scope':','.join(AUTH_SCOPE)}))
-
-        httpd = StoppableHTTPServer((HOST_NAME, SERVER_PORT), _RequestHandler)           
-        thread.start_new_thread(httpd.serve, ())
 
 def graph(path, params=None):
     """Send a GET request to the graph api.
